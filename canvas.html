@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatGPT Conversation Analysis Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@^4"></script> <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-sankey@^0.12.1/dist/chartjs-chart-sankey.min.js"></script>
+    <style>
+        /* Custom styles if needed */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        input[type="file"]::file-selector-button {
+            margin-right: 1rem; display: inline-block; font-weight: 600;
+            color: #4f46e5; padding: 0.5rem 1rem; border-radius: 0.375rem;
+            border: 1px solid #4f46e5; cursor: pointer;
+            transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
+        }
+        input[type="file"]::file-selector-button:hover {
+            background-color: #e0e7ff;
+        }
+        .chart-container {
+            position: relative; height: 300px; width: 100%;
+        }
+        /* Adjust height specifically for Sankey if needed */
+        #sankeyChartContainer {
+             height: 400px; /* Sankey might need more height */
+        }
+        .loader {
+            border: 4px solid #f3f3f3; border-top: 4px solid #4f46e5;
+            border-radius: 50%; width: 40px; height: 40px;
+            animation: spin 1s linear infinite; margin: 20px auto;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+     <link rel="preconnect" href="https://rsms.me/">
+     <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+</head>
+<body class="p-4 md:p-8">
+    <header class="mb-8 text-center">
+        <h1 class="text-3xl font-bold text-gray-800">ChatGPT Conversation Analysis</h1>
+        <p class="text-gray-600 mt-2">Upload your `conversations.json` file to see the analysis.</p>
+    </header>
+
+    <section class="mb-6 max-w-xl mx-auto bg-white p-6 rounded-lg shadow">
+        <label for="jsonFile" class="block text-sm font-medium text-gray-700 mb-2">Select `conversations.json` file:</label>
+        <input type="file" id="jsonFile" accept=".json" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border file:border-indigo-600 file:text-sm file:font-semibold file:text-indigo-600 hover:file:bg-indigo-100 cursor-pointer"/>
+        <button id="analyzeButton" class="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-md transition duration-150 ease-in-out disabled:opacity-50" disabled>
+            Analyze File
+        </button>
+        <div id="status" class="mt-4 text-center text-sm text-gray-600"></div>
+        <div id="loadingIndicator" class="hidden loader"></div>
+        <div id="error" class="mt-4 text-center text-sm text-red-600"></div>
+    </section>
+
+    <main id="results" class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div class="md:col-span-2 lg:col-span-3 bg-white p-6 rounded-lg shadow">
+             <h2 class="text-xl font-semibold text-gray-700 mb-4">Summary</h2>
+             <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 text-center">
+                 <div class="bg-indigo-50 p-4 rounded-lg">
+                     <div class="text-sm font-medium text-indigo-700">Total Chats</div>
+                     <div id="totalChats" class="text-2xl font-bold text-indigo-900">-</div>
+                 </div>
+                 <div class="bg-blue-50 p-4 rounded-lg">
+                     <div class="text-sm font-medium text-blue-700">Total Nodes</div>
+                     <div id="totalNodes" class="text-2xl font-bold text-blue-900">-</div>
+                 </div>
+                 <div class="bg-green-50 p-4 rounded-lg">
+                     <div class="text-sm font-medium text-green-700">Avg Nodes/Chat</div>
+                     <div id="avgNodes" class="text-2xl font-bold text-green-900">-</div>
+                 </div>
+                  <div class="bg-yellow-50 p-4 rounded-lg">
+                     <div class="text-sm font-medium text-yellow-700">Chats with Code</div>
+                     <div id="chatsWithCode" class="text-2xl font-bold text-yellow-900">-</div>
+                 </div>
+             </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-lg shadow">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Chats by Message Count</h2>
+            <div class="chart-container">
+                <canvas id="messageCountChart"></canvas>
+            </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-lg shadow">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Chats by Word Count</h2>
+            <div class="chart-container">
+                <canvas id="wordCountChart"></canvas>
+            </div>
+        </div>
+
+        <div class="md:col-span-2 lg:col-span-3 bg-white p-6 rounded-lg shadow">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Flow: Message Count to Word Count</h2>
+            <p class="text-xs text-gray-500 mb-2">(Flow widths use log scale for readability; see tooltips for actual counts)</p>
+            <div id="sankeyChartContainer" class="chart-container">
+                <canvas id="sankeyChartCanvas"></canvas>
+            </div>
+        </div>
+
+
+         <div class="bg-white p-6 rounded-lg shadow">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">User vs Assistant (Messages)</h2>
+            <div class="chart-container" style="height: 200px;">
+                 <canvas id="userVsAssistantMessagesChart"></canvas>
+            </div>
+             <div class="mt-4 text-sm text-center text-gray-600">
+                 Avg User: <span id="avgUserMessages" class="font-semibold">-</span> |
+                 Avg Assistant: <span id="avgAssistantMessages" class="font-semibold">-</span>
+             </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-lg shadow">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">User vs Assistant (Words)</h2>
+            <div class="chart-container" style="height: 200px;">
+                 <canvas id="userVsAssistantWordsChart"></canvas>
+            </div>
+             <div class="mt-4 text-sm text-center text-gray-600">
+                 Avg User: <span id="avgUserWords" class="font-semibold">-</span> |
+                 Avg Assistant: <span id="avgAssistantWords" class="font-semibold">-</span>
+             </div>
+        </div>
+
+
+        <div class="bg-white p-6 rounded-lg shadow">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Usage by Hour of Day</h2>
+            <div class="chart-container">
+                <canvas id="usageHourChart"></canvas>
+            </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-lg shadow">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Usage by Day of Week</h2>
+            <div class="chart-container">
+                <canvas id="usageDayChart"></canvas>
+            </div>
+        </div>
+
+    </main>
+
+    <footer class="mt-12 text-center text-sm text-gray-500">
+        Dashboard generated by AI. Analysis is performed locally in your browser.
+    </footer>
+
+    <script>
+        // --- DOM Elements ---
+        const fileInput = document.getElementById('jsonFile');
+        const analyzeButton = document.getElementById('analyzeButton');
+        const statusDiv = document.getElementById('status');
+        const errorDiv = document.getElementById('error');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const resultsDiv = document.getElementById('results');
+
+        // --- Chart instances ---
+        let chartInstances = {}; // To store chart instances for potential updates/destruction
+
+        // --- Analysis Configuration ---
+        // Define bins with consistent keys for easier mapping
+        const WORD_COUNT_BINS = {
+            "W:<1k": [0, 1000],
+            "W:1k-5k": [1000, 5000],
+            "W:5k-10k": [5000, 10000],
+            "W:10k-20k": [10000, 20000],
+            "W:20k+": [20000, Infinity]
+        };
+        const MESSAGE_COUNT_BINS = {
+            "M:1-10": [1, 11],
+            "M:11-20": [11, 21],
+            "M:21-50": [21, 51],
+            "M:51-100": [51, 101],
+            "M:101+": [101, Infinity]
+        };
+        const WEEKDAY_MAP = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+        // --- Event Listeners ---
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                analyzeButton.disabled = false;
+                statusDiv.textContent = `Selected file: ${fileInput.files[0].name}`;
+                errorDiv.textContent = '';
+                resultsDiv.classList.add('hidden');
+            } else {
+                analyzeButton.disabled = true;
+                statusDiv.textContent = '';
+            }
+        });
+
+        analyzeButton.addEventListener('click', handleAnalysis);
+
+        // --- Core Analysis Logic ---
+
+        async function handleAnalysis() {
+            const file = fileInput.files[0];
+            if (!file) { errorDiv.textContent = 'Please select a file first.'; return; }
+
+            errorDiv.textContent = '';
+            statusDiv.textContent = 'Reading file...';
+            loadingIndicator.classList.remove('hidden');
+            analyzeButton.disabled = true;
+            resultsDiv.classList.add('hidden');
+            destroyCharts();
+
+            try {
+                const fileContent = await readFileContent(file);
+                statusDiv.textContent = 'Parsing JSON...';
+                const allConversationsData = JSON.parse(fileContent);
+
+                statusDiv.textContent = 'Analyzing conversations... This may take a moment.';
+                setTimeout(() => {
+                    try {
+                        const analysisResults = performAnalysis(allConversationsData);
+                        statusDiv.textContent = 'Analysis complete!';
+                        loadingIndicator.classList.add('hidden');
+                        displayResults(analysisResults);
+                        resultsDiv.classList.remove('hidden');
+                    } catch (analysisError) {
+                        console.error("Analysis Error:", analysisError);
+                        errorDiv.textContent = `Analysis failed: ${analysisError.message}`;
+                        statusDiv.textContent = 'Analysis failed.';
+                        loadingIndicator.classList.add('hidden');
+                    } finally {
+                         analyzeButton.disabled = false;
+                    }
+                }, 50);
+
+            } catch (err) {
+                console.error("File Reading/Parsing Error:", err);
+                errorDiv.textContent = `Error reading or parsing file: ${err.message}`;
+                statusDiv.textContent = 'Error.';
+                loadingIndicator.classList.add('hidden');
+                analyzeButton.disabled = false;
+            }
+        }
+
+        function readFileContent(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (event) => resolve(event.target.result);
+                reader.onerror = (error) => reject(error);
+                reader.readAsText(file);
+            });
+        }
+
+        function getConversationMessages(conversationData) {
+            const messages = [];
+            const mapping = conversationData.mapping;
+            let current_node_id = conversationData.current_node;
+            if (!mapping || !current_node_id) return [];
+            const processed_node_ids = new Set();
+
+            while (current_node_id && !processed_node_ids.has(current_node_id)) {
+                 processed_node_ids.add(current_node_id);
+                 const node = mapping[current_node_id];
+                 if (!node) break;
+                 const message_data = node.message;
+
+                 if (message_data?.author &&
+                     ['user', 'assistant'].includes(message_data.author.role) &&
+                     message_data.status === 'finished_successfully' &&
+                     message_data.content?.content_type &&
+                     ['text', 'multimodal_text'].includes(message_data.content.content_type) &&
+                     message_data.content.parts)
+                 {
+                     let text_content = "";
+                     message_data.content.parts.forEach(part => {
+                         if (typeof part === 'string' && part.trim()) {
+                             text_content += part + " ";
+                         } else if (typeof part === 'object' && part?.text) {
+                            text_content += part.text + " ";
+                         }
+                     });
+                     text_content = text_content.trim();
+
+                     if (text_content) {
+                         const create_time_unix = message_data.create_time;
+                         messages.push({
+                             role: message_data.author.role,
+                             text: text_content,
+                             word_count: text_content.split(/\s+/).filter(Boolean).length,
+                             create_time: create_time_unix ? new Date(create_time_unix * 1000) : null,
+                             has_code: text_content.includes('```'),
+                         });
+                     }
+                 }
+                 current_node_id = node.parent;
+            }
+            return messages.reverse();
+        }
+
+        /**
+         * Finds the bin name for a given value and bin definition.
+         */
+        function findBin(value, bins) {
+            for (const binName in bins) {
+                const [lower, upper] = bins[binName];
+                // Ensure value is a number before comparison
+                if (typeof value === 'number' && value >= lower && value < upper) {
+                    return binName;
+                }
+            }
+             // Handle cases where value might be 0 or very small for message/word counts
+            if (typeof value === 'number' && value === 0 && bins[Object.keys(bins)[0]][0] === 0) {
+                 return Object.keys(bins)[0]; // Assign to the first bin if it starts at 0
+            }
+            // Handle edge case for message count potentially being 0
+             if (key === 'numMessages' && value === 0 && MESSAGE_COUNT_BINS["M:1-10"][0] === 1) {
+                 // Decide how to handle 0 message chats if the first bin starts at 1
+                 // Option: Assign to the first bin anyway or create a separate "0" bin
+                 // Let's assign to the first bin for simplicity here
+                 // return "M:1-10"; // Or return null / handle differently
+             }
+             // If no bin is found (e.g., value is null or NaN), return null
+            return null;
+        }
+
+
+        /**
+         * Performs all analyses, including Sankey data calculation.
+         */
+        function performAnalysis(allConversationsData) {
+            const conversationDetails = []; // Still useful for individual stats if needed later
+            let totalNodes = 0;
+            const chatsByHour = Array(24).fill(0);
+            const chatsByWeekday = Array(7).fill(0);
+            let totalUserMessages = 0, totalAssistantMessages = 0;
+            let totalUserWords = 0, totalAssistantWords = 0;
+            let totalChatsWithCode = 0;
+
+            // Data structure for Sankey: { "MsgBin": { "WordBin": count } }
+            const sankeyCounts = {};
+            Object.keys(MESSAGE_COUNT_BINS).forEach(mBin => {
+                sankeyCounts[mBin] = {};
+                Object.keys(WORD_COUNT_BINS).forEach(wBin => {
+                    sankeyCounts[mBin][wBin] = 0;
+                });
+            });
+
+            allConversationsData.forEach(convoData => {
+                const convoCreateTimeUnix = convoData.create_time;
+                const convoCreateTimeDt = convoCreateTimeUnix ? new Date(convoCreateTimeUnix * 1000) : null;
+
+                const numNodes = Object.keys(convoData.mapping || {}).length;
+                totalNodes += numNodes;
+
+                const messages = getConversationMessages(convoData);
+                const numMessages = messages.length;
+                // Ensure numMessages is handled if 0 (findBin might need adjustment or specific handling)
+                if (numMessages === 0) {
+                    // Optionally skip this conversation for binning or assign to a default bin
+                    // console.log("Skipping conversation with 0 messages for binning.");
+                    // continue; // Or handle as needed
+                }
+
+                const totalWords = messages.reduce((sum, msg) => sum + msg.word_count, 0);
+
+                // Determine bins for this conversation
+                const messageBin = findBin(numMessages, MESSAGE_COUNT_BINS);
+                const wordBin = findBin(totalWords, WORD_COUNT_BINS);
+
+                // Increment Sankey count only if both bins are validly found
+                if (messageBin && wordBin) {
+                     if (!sankeyCounts[messageBin]) sankeyCounts[messageBin] = {}; // Ensure inner object exists
+                     if (!sankeyCounts[messageBin][wordBin]) sankeyCounts[messageBin][wordBin] = 0; // Ensure count exists
+                    sankeyCounts[messageBin][wordBin]++;
+                } else {
+                    // Log if a conversation didn't fit into expected bins
+                    // console.warn(`Conversation could not be binned: Msgs=${numMessages}, Words=${totalWords}`);
+                }
+
+
+                let userMessages = 0, assistantMessages = 0;
+                let userWords = 0, assistantWords = 0;
+                let containsCode = false;
+                messages.forEach(msg => {
+                    if (msg.role === 'user') { userMessages++; userWords += msg.word_count; }
+                    else { assistantMessages++; assistantWords += msg.word_count; }
+                    if (msg.has_code) containsCode = true;
+                });
+
+                totalUserMessages += userMessages;
+                totalAssistantMessages += assistantMessages;
+                totalUserWords += userWords;
+                totalAssistantWords += assistantWords;
+                if (containsCode) totalChatsWithCode++;
+
+                if (convoCreateTimeDt) {
+                    chatsByHour[convoCreateTimeDt.getHours()]++;
+                    const dayOfWeek = (convoCreateTimeDt.getDay() + 6) % 7;
+                    chatsByWeekday[dayOfWeek]++;
+                }
+
+                conversationDetails.push({ numMessages, totalWords /* add more if needed */ });
+            });
+
+            const numConversations = allConversationsData.length;
+            const chatsByMessageBin = binData(conversationDetails, 'numMessages', MESSAGE_COUNT_BINS);
+            const chatsByWordBin = binData(conversationDetails, 'totalWords', WORD_COUNT_BINS);
+            const avgNodes = numConversations > 0 ? (totalNodes / numConversations) : 0;
+            const avgUserMessages = numConversations > 0 ? (totalUserMessages / numConversations) : 0;
+            const avgAssistantMessages = numConversations > 0 ? (totalAssistantMessages / numConversations) : 0;
+            const avgUserWords = numConversations > 0 ? (totalUserWords / numConversations) : 0;
+            const avgAssistantWords = numConversations > 0 ? (totalAssistantWords / numConversations) : 0;
+            const codePercentage = numConversations > 0 ? (totalChatsWithCode / numConversations * 100) : 0;
+
+            return {
+                numConversations, totalNodes, avgNodes,
+                chatsByMessageBin, chatsByWordBin,
+                totalUserMessages, totalAssistantMessages, totalUserWords, totalAssistantWords,
+                avgUserMessages, avgAssistantMessages, avgUserWords, avgAssistantWords,
+                totalChatsWithCode, codePercentage,
+                chatsByHour, chatsByWeekday,
+                sankeyCounts // Include the raw counts for Sankey formatting
+            };
+        }
+
+        function binData(data, key, bins) {
+            const binnedCounts = Object.keys(bins).reduce((acc, binName) => ({ ...acc, [binName]: 0 }), {});
+            data.forEach(item => {
+                const binName = findBin(item[key], bins);
+                if (binName) {
+                    binnedCounts[binName]++;
+                }
+            });
+            return binnedCounts;
+        }
+
+        // --- UI Update Functions ---
+        function destroyCharts() {
+            Object.values(chartInstances).forEach(chart => chart?.destroy());
+            chartInstances = {};
+        }
+
+        function displayResults(results) {
+            // Update Summary Cards
+            document.getElementById('totalChats').textContent = results.numConversations.toLocaleString();
+            document.getElementById('totalNodes').textContent = results.totalNodes.toLocaleString();
+            document.getElementById('avgNodes').textContent = results.avgNodes.toFixed(2);
+            document.getElementById('chatsWithCode').textContent = `${results.totalChatsWithCode.toLocaleString()} (${results.codePercentage.toFixed(1)}%)`;
+
+            // Update Avg Texts
+            document.getElementById('avgUserMessages').textContent = results.avgUserMessages.toFixed(2);
+            document.getElementById('avgAssistantMessages').textContent = results.avgAssistantMessages.toFixed(2);
+            document.getElementById('avgUserWords').textContent = results.avgUserWords.toFixed(0).toLocaleString();
+            document.getElementById('avgAssistantWords').textContent = results.avgAssistantWords.toFixed(0).toLocaleString();
+
+            // Create Charts
+            createBarChart('messageCountChart', 'Messages per Chat', results.chatsByMessageBin);
+            createBarChart('wordCountChart', 'Words per Chat', results.chatsByWordBin);
+            createDoughnutChart('userVsAssistantMessagesChart', 'Messages', { User: results.totalUserMessages, Assistant: results.totalAssistantMessages });
+            createDoughnutChart('userVsAssistantWordsChart', 'Words', { User: results.totalUserWords, Assistant: results.totalAssistantWords });
+            createBarChart('usageHourChart', 'Chats per Hour', results.chatsByHour, Array.from({length: 24}, (_, i) => `${i.toString().padStart(2, '0')}:00`));
+            createBarChart('usageDayChart', 'Chats per Day', results.chatsByWeekday, WEEKDAY_MAP);
+
+            // Create Sankey Chart
+            createSankeyChart('sankeyChartCanvas', results.sankeyCounts);
+        }
+
+        function createBarChart(canvasId, label, dataObject, labels) {
+            const ctx = document.getElementById(canvasId)?.getContext('2d');
+            if (!ctx) return;
+            const chartLabels = labels || Object.keys(dataObject);
+            const chartData = Array.isArray(dataObject) ? dataObject : Object.values(dataObject);
+
+            chartInstances[canvasId] = new Chart(ctx, {
+                type: 'bar',
+                data: { labels: chartLabels, datasets: [{ label, data: chartData, backgroundColor: 'rgba(79, 70, 229, 0.6)', borderColor: 'rgba(79, 70, 229, 1)', borderWidth: 1 }] },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { color: '#4b5563' } }, x: { ticks: { color: '#4b5563' } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${ctx.dataset.label || ''}: ${ctx.parsed.y?.toLocaleString()}` } } } }
+            });
+        }
+
+        function createDoughnutChart(canvasId, title, dataObject) {
+             const ctx = document.getElementById(canvasId)?.getContext('2d');
+             if (!ctx) return;
+             const chartLabels = Object.keys(dataObject);
+             const chartData = Object.values(dataObject);
+             const backgroundColors = ['rgba(59, 130, 246, 0.6)', 'rgba(16, 185, 129, 0.6)', 'rgba(239, 68, 68, 0.6)', 'rgba(245, 158, 11, 0.6)'];
+             const borderColors = ['rgba(59, 130, 246, 1)', 'rgba(16, 185, 129, 1)', 'rgba(239, 68, 68, 1)', 'rgba(245, 158, 11, 1)'];
+
+             chartInstances[canvasId] = new Chart(ctx, {
+                 type: 'doughnut',
+                 data: { labels: chartLabels, datasets: [{ label: title, data: chartData, backgroundColor: backgroundColors.slice(0, chartData.length), borderColor: borderColors.slice(0, chartData.length), borderWidth: 1 }] },
+                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#4b5563' } }, tooltip: { callbacks: { label: ctx => { const total = ctx.dataset.data.reduce((s, v) => s + v, 0); const perc = total > 0 ? (ctx.parsed / total * 100).toFixed(1) : 0; return `${ctx.label}: ${ctx.parsed.toLocaleString()} (${perc}%)`; } } } } }
+             });
+        }
+
+        /**
+         * Formats the aggregated counts into the structure required by chartjs-chart-sankey.
+         * Applies logarithmic scaling to the flow value.
+         * @param {object} sankeyCounts - Nested object: { "MsgBin": { "WordBin": count } }
+         * @returns {Array<object>} - Array of flow objects: [{ from, to, flow (log-scaled), originalFlow }]
+         */
+        function formatSankeyData(sankeyCounts) {
+            const sankeyData = [];
+            for (const msgBin in sankeyCounts) {
+                for (const wordBin in sankeyCounts[msgBin]) {
+                    const count = sankeyCounts[msgBin][wordBin];
+                    if (count > 0) { // Only include flows with actual counts
+                        sankeyData.push({
+                            from: msgBin, // Use bin names directly as nodes
+                            to: wordBin,
+                            // Apply log scaling: log(1 + x) to handle potential 0 counts gracefully if they occurred
+                            // Add a small constant if even log(1) is too small visually for smallest flows
+                            flow: Math.log1p(count) + 0.1, // Add 0.1 ensures even count 1 has some visible width
+                            originalFlow: count // Store original count for tooltip
+                        });
+                    }
+                }
+            }
+            return sankeyData;
+        }
+
+        /**
+         * Creates the Sankey chart with log-scaled flows.
+         * @param {string} canvasId - ID of the canvas element.
+         * @param {object} sankeyCounts - Nested object of counts from performAnalysis.
+         */
+        function createSankeyChart(canvasId, sankeyCounts) {
+            const ctx = document.getElementById(canvasId)?.getContext('2d');
+            if (!ctx) { console.error(`Canvas element with ID ${canvasId} not found.`); return; }
+
+            const data = formatSankeyData(sankeyCounts);
+
+            if (data.length === 0) {
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                ctx.font = "16px Inter"; ctx.fillStyle = "#6b7280";
+                ctx.textAlign = "center";
+                ctx.fillText("No flow data available for Sankey diagram.", ctx.canvas.width / 2, 50);
+                return;
+            }
+
+            // Define a color palette
+            const colors = {
+                'M:1-10': 'rgba(59, 130, 246, 0.7)',   // Blue
+                'M:11-20': 'rgba(16, 185, 129, 0.7)',  // Emerald
+                'M:21-50': 'rgba(245, 158, 11, 0.7)', // Amber
+                'M:51-100': 'rgba(239, 68, 68, 0.7)',  // Red
+                'M:101+': 'rgba(139, 92, 246, 0.7)',  // Violet
+                'W:<1k': 'rgba(107, 114, 128, 0.7)', // Gray
+                'W:1k-5k': 'rgba(34, 197, 94, 0.7)',  // Green
+                'W:5k-10k': 'rgba(217, 70, 239, 0.7)', // Fuchsia
+                'W:10k-20k': 'rgba(249, 115, 22, 0.7)',// Orange
+                'W:20k+': 'rgba(99, 102, 241, 0.7)'   // Indigo
+            };
+
+            chartInstances[canvasId] = new Chart(ctx, {
+                type: 'sankey',
+                data: {
+                    datasets: [{
+                        label: 'Conversation Flow',
+                        data: data, // Contains { from, to, flow (log-scaled), originalFlow }
+                        colorFrom: (c) => colors[c.dataset.data[c.dataIndex].from] || 'rgba(156, 163, 175, 0.7)',
+                        colorTo: (c) => colors[c.dataset.data[c.dataIndex].to] || 'rgba(156, 163, 175, 0.7)',
+                        nodeColors: colors,
+                        colorMode: 'gradient',
+                        borderWidth: 0,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                // Display the ORIGINAL flow count in the tooltip
+                                label: (context) => {
+                                    const item = context.dataset.data[context.dataIndex];
+                                    // Access the originalFlow we stored earlier
+                                    const originalFlowCount = item.originalFlow;
+                                    return `${item.from} -> ${item.to}: ${originalFlowCount.toLocaleString()} chats (width log-scaled)`;
+                                }
+                            }
+                        }
+                    },
+                     layout: { padding: { top: 20, bottom: 20, left: 10, right: 10 } },
+                     // Node/Flow options (optional adjustments)
+                     // node: { width: 10, spacing: 5 },
+                     // flow: { colorMode: 'gradient' }
+                }
+            });
+        }
+
+
+    </script>
+</body>
+</html>
